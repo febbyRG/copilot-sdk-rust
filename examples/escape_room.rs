@@ -7,8 +7,8 @@
 //! `cargo run --example escape_room`
 
 use copilot_sdk::{
-    Client, LogLevel, SessionConfig, SessionEventData, SystemMessageConfig, SystemMessageMode,
-    Tool, ToolHandler, ToolResultObject, find_copilot_cli,
+    find_copilot_cli, Client, LogLevel, SessionConfig, SessionEventData, SystemMessageConfig,
+    SystemMessageMode, Tool, ToolHandler, ToolResultObject,
 };
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -250,6 +250,6 @@ Finally, output the code as: PART1-PART2-PART3.
         }
     }
 
-    client.stop().await?;
+    client.stop().await;
     Ok(())
 }

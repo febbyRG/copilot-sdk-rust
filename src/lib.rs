@@ -30,7 +30,7 @@
 //!         }
 //!     }
 //!
-//!     client.stop().await?;
+//!     client.stop().await;
 //!     Ok(())
 //! }
 //! ```
@@ -41,12 +41,18 @@ pub mod events;
 pub mod jsonrpc;
 pub mod process;
 pub mod session;
+pub mod tools;
 pub mod transport;
 pub mod types;
+
+// Re-export tool utilities
+pub use tools::define_tool;
 
 // Re-export main types at crate root for convenience
 pub use error::{CopilotError, Result};
 pub use types::{
+    // Session lifecycle event type constants
+    session_lifecycle_event_types,
     // Enums
     AttachmentType,
     // Config types
@@ -54,8 +60,13 @@ pub use types::{
     ClientOptions,
     ConnectionState,
     CustomAgentConfig,
+    // Hook types
+    ErrorOccurredHandler,
+    ErrorOccurredHookInput,
+    ErrorOccurredHookOutput,
     // Response types
     GetAuthStatusResponse,
+    GetForegroundSessionResponse,
     GetStatusResponse,
     InfiniteSessionConfig,
     LogLevel,
@@ -69,16 +80,37 @@ pub use types::{
     ModelLimits,
     ModelPolicy,
     ModelSupports,
+    ModelVisionLimits,
     // Permission types
     PermissionRequest,
     PermissionRequestResult,
     PingResponse,
+    PostToolUseHandler,
+    PostToolUseHookInput,
+    PostToolUseHookOutput,
+    PreToolUseHandler,
+    PreToolUseHookInput,
+    PreToolUseHookOutput,
     ProviderConfig,
     ResumeSessionConfig,
-    // Constants
-    SDK_PROTOCOL_VERSION,
+    // Selection types
+    SelectionAttachment,
+    SelectionPosition,
+    SelectionRange,
     SessionConfig,
+    SessionEndHandler,
+    SessionEndHookInput,
+    SessionEndHookOutput,
+    SessionHooks,
+    // Session lifecycle types
+    SessionLifecycleEvent,
+    SessionLifecycleEventMetadata,
     SessionMetadata,
+    SessionStartHandler,
+    SessionStartHookInput,
+    SessionStartHookOutput,
+    SetForegroundSessionResponse,
+    StopError,
     SystemMessageConfig,
     SystemMessageMode,
     // Tool types
@@ -87,7 +119,16 @@ pub use types::{
     ToolInvocation,
     ToolResult,
     ToolResultObject,
+    // User input types
+    UserInputInvocation,
+    UserInputRequest,
+    UserInputResponse,
     UserMessageAttachment,
+    UserPromptSubmittedHandler,
+    UserPromptSubmittedHookInput,
+    UserPromptSubmittedHookOutput,
+    // Constants
+    SDK_PROTOCOL_VERSION,
 };
 
 // Re-export event types
@@ -102,6 +143,7 @@ pub use events::{
     AssistantTurnEndData,
     AssistantTurnStartData,
     AssistantUsageData,
+    CompactionTokensUsed,
     CustomAgentCompletedData,
     CustomAgentFailedData,
     CustomAgentSelectedData,
@@ -114,6 +156,8 @@ pub use events::{
     // Main event types
     RawSessionEvent,
     RepositoryInfo,
+    SessionCompactionCompleteData,
+    SessionCompactionStartData,
     SessionErrorData,
     SessionEvent,
     SessionEventData,
@@ -122,14 +166,21 @@ pub use events::{
     SessionInfoData,
     SessionModelChangeData,
     SessionResumeData,
+    SessionShutdownData,
+    SessionSnapshotRewindData,
     SessionStartData,
     SessionTruncationData,
+    SessionUsageInfoData,
+    ShutdownCodeChanges,
+    ShutdownType,
+    SkillInvokedData,
     SystemMessageEventData,
     SystemMessageMetadata,
     SystemMessageRole,
     ToolExecutionCompleteData,
     ToolExecutionError,
     ToolExecutionPartialResultData,
+    ToolExecutionProgressData,
     ToolExecutionStartData,
     ToolRequestItem,
     ToolResultContent,
@@ -149,14 +200,14 @@ pub use jsonrpc::{
 
 // Re-export process types
 pub use process::{
-    CopilotProcess, ProcessOptions, find_copilot_cli, find_executable, find_node, is_node_script,
+    find_copilot_cli, find_executable, find_node, is_node_script, CopilotProcess, ProcessOptions,
 };
 
 // Re-export session types
 pub use session::{
     EventHandler, EventSubscription, InvokeFuture, PermissionHandler, RegisteredTool, Session,
-    ToolHandler,
+    ToolHandler, UserInputHandler,
 };
 
 // Re-export client types
-pub use client::{Client, ClientBuilder};
+pub use client::{Client, ClientBuilder, LifecycleHandler};
