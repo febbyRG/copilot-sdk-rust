@@ -16,7 +16,7 @@ fn is_false(value: &bool) -> bool {
 // =============================================================================
 
 /// SDK protocol version - must match copilot-agent-runtime server.
-pub const SDK_PROTOCOL_VERSION: u32 = 2;
+pub const SDK_PROTOCOL_VERSION: u32 = 3;
 
 // =============================================================================
 // Enums
