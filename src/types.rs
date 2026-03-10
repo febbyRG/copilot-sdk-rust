@@ -185,6 +185,25 @@ pub struct PermissionRequest {
     pub extension_data: HashMap<String, serde_json::Value>,
 }
 
+impl PermissionRequest {
+    /// Parse a PermissionRequest from a JSON value.
+    /// Falls back to a minimal struct if deserialization fails.
+    pub fn from_json(value: &serde_json::Value) -> Self {
+        serde_json::from_value(value.clone()).unwrap_or_else(|_| Self {
+            kind: value
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string(),
+            tool_call_id: value
+                .get("toolCallId")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            extension_data: HashMap::new(),
+        })
+    }
+}
+
 /// Result of a permission request (response to CLI).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -232,6 +251,13 @@ impl PermissionRequestResult {
     /// Returns true if the permission was denied.
     pub fn is_denied(&self) -> bool {
         self.kind.starts_with("denied")
+    }
+
+    /// Serialize to JSON value for RPC responses.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or_else(|_| serde_json::json!({
+            "kind": self.kind,
+        }))
     }
 }
 
@@ -548,6 +574,12 @@ impl std::fmt::Debug for Tool {
 }
 
 // Serialization for sending tool definitions to the CLI
+//
+// The CLI's `mapProtocolExternalTools` reads `n.parameters` (not `inputSchema`)
+// when registering external tools from session.create. See CLI source:
+//   mapProtocolExternalTools(e) { return e.map(n => ({
+//     name: n.name, description: n.description, parameters: n.parameters
+//   })) }
 impl Serialize for Tool {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
@@ -557,7 +589,7 @@ impl Serialize for Tool {
         let mut state = serializer.serialize_struct("Tool", 3)?;
         state.serialize_field("name", &self.name)?;
         state.serialize_field("description", &self.description)?;
-        state.serialize_field("parametersSchema", &self.parameters_schema)?;
+        state.serialize_field("parameters", &self.parameters_schema)?;
         state.end()
     }
 }

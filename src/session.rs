@@ -228,7 +228,12 @@ impl Session {
     /// Dispatch an event to all subscribers.
     ///
     /// This is called by the Client when events are received.
+    /// For protocol v3 broadcast request events (`external_tool.requested`,
+    /// `permission.requested`), executes the handler and responds via RPC.
     pub async fn dispatch_event(&self, event: SessionEvent) {
+        // Handle v3 broadcast request events (fire-and-forget)
+        self.handle_broadcast_event(&event);
+
         // Send to broadcast channel
         let _ = self.event_tx.send(event.clone());
 
@@ -236,6 +241,128 @@ impl Session {
         let state = self.state.read().await;
         for handler in state.event_handlers.values() {
             handler(&event);
+        }
+    }
+
+    /// Handle protocol v3 broadcast request events.
+    ///
+    /// In protocol v3, tool calls and permission requests are sent as session
+    /// events instead of JSON-RPC requests. The SDK must intercept these events,
+    /// execute the appropriate handler, and respond via RPC.
+    fn handle_broadcast_event(&self, event: &SessionEvent) {
+        match &event.data {
+            SessionEventData::ExternalToolRequested(data) => {
+                let session_id = self.session_id.clone();
+                let request_id = data.request_id.clone();
+                let tool_name = data.tool_name.clone();
+                let tool_call_id = data.tool_call_id.clone();
+                let args = data.arguments.clone().unwrap_or(Value::Object(Default::default()));
+                let state = Arc::clone(&self.state);
+                let invoke_fn = Arc::clone(&self.invoke_fn);
+
+                tokio::spawn(async move {
+                    let handler = {
+                        let st = state.read().await;
+                        st.tools.get(&tool_name).and_then(|rt| rt.handler.clone())
+                    };
+
+                    let (result_str, error_str) = if let Some(handler) = handler {
+                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            handler(&tool_name, &args)
+                        })) {
+                            Ok(result) => {
+                                if result.result_type == "error" {
+                                    let err_msg = result.error.unwrap_or(result.text_result_for_llm);
+                                    (None, Some(err_msg))
+                                } else {
+                                    (Some(result.text_result_for_llm), None)
+                                }
+                            }
+                            Err(_) => {
+                                (None, Some(format!("Tool '{}' panicked", tool_name)))
+                            }
+                        }
+                    } else {
+                        (None, Some(format!("No handler registered for tool '{}'", tool_name)))
+                    };
+
+                    // Respond via session.tools.handlePendingToolCall
+                    let mut params = serde_json::json!({
+                        "sessionId": session_id,
+                        "requestId": request_id,
+                    });
+                    if let Some(result) = result_str {
+                        params["result"] = Value::String(result);
+                    }
+                    if let Some(error) = error_str {
+                        params["error"] = Value::String(error);
+                    }
+
+                    if let Err(e) = invoke_fn(
+                        "session.tools.handlePendingToolCall",
+                        Some(params),
+                    ).await {
+                        tracing::warn!(
+                            tool = %tool_name,
+                            tool_call_id = %tool_call_id,
+                            "Failed to respond to external tool request: {}",
+                            e
+                        );
+                    }
+                });
+            }
+
+            SessionEventData::PermissionRequested(data) => {
+                let session_id = self.session_id.clone();
+                let request_id = data.request_id.clone();
+                let perm_request_json = data.permission_request.clone();
+                let state = Arc::clone(&self.state);
+                let invoke_fn = Arc::clone(&self.invoke_fn);
+
+                tokio::spawn(async move {
+                    // Build PermissionRequest from the JSON
+                    let perm_request = PermissionRequest::from_json(&perm_request_json);
+
+                    // Get the permission handler result
+                    let result = {
+                        let st = state.read().await;
+                        if let Some(handler) = &st.permission_handler {
+                            handler(&perm_request)
+                        } else {
+                            // Default: approve custom-tool permissions (they are SDK-owned tools)
+                            let kind = perm_request_json
+                                .get("kind")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            if kind == "custom-tool" {
+                                PermissionRequestResult::approved()
+                            } else {
+                                PermissionRequestResult::denied()
+                            }
+                        }
+                    };
+
+                    // Respond via session.permissions.handlePendingPermissionRequest
+                    let params = serde_json::json!({
+                        "sessionId": session_id,
+                        "requestId": request_id,
+                        "result": result.to_json(),
+                    });
+
+                    if let Err(e) = invoke_fn(
+                        "session.permissions.handlePendingPermissionRequest",
+                        Some(params),
+                    ).await {
+                        tracing::warn!(
+                            request_id = %request_id,
+                            "Failed to respond to permission request: {}",
+                            e
+                        );
+                    }
+                });
+            }
+
+            _ => {} // Not a broadcast request event
         }
     }
 

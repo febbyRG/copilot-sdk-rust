@@ -142,6 +142,55 @@ Set `COPILOT_SDK_RUST_SNAPSHOT_DIR` or `UPSTREAM_SNAPSHOTS` to point at `copilot
 
 - Supports stdio (spawned CLI) and TCP (spawned or external server).
 
+## Protocol Versions
+
+This SDK supports both **v2** and **v3** of the Copilot CLI protocol. The CLI version determines which protocol is used.
+
+### Protocol v2 (CLI < 1.0.0)
+
+Tool calls and permission requests are dispatched as **JSON-RPC requests** from the CLI to the SDK:
+
+```
+CLI → SDK:  tool.call  (JSON-RPC request)
+SDK → CLI:  { result: "..." }  (JSON-RPC response)
+
+CLI → SDK:  permission.request  (JSON-RPC request)
+SDK → CLI:  { result: { kind: "approved" } }  (JSON-RPC response)
+```
+
+The SDK handles these in `client.rs` via `set_request_handler`.
+
+### Protocol v3 (CLI >= 1.0.0, SDK protocol version 3)
+
+Tool calls and permission requests are dispatched as **session events** (broadcast). The SDK must intercept these events, execute the appropriate handler, and respond by calling an RPC method back on the CLI.
+
+**Permission flow:**
+
+```
+CLI → SDK:  session.event { type: "permission.requested", data: { requestId, permissionRequest: { kind, ... } } }
+SDK → CLI:  session.permissions.handlePendingPermissionRequest { sessionId, requestId, result: { kind: "approved" } }
+```
+
+**Tool call flow:**
+
+```
+CLI → SDK:  session.event { type: "external_tool.requested", data: { requestId, toolCallId, toolName, arguments } }
+SDK → CLI:  session.tools.handlePendingToolCall { sessionId, requestId, result: "..." }
+```
+
+**Key differences from v2:**
+
+| Aspect | v2 | v3 |
+|---|---|---|
+| Tool dispatch | `tool.call` JSON-RPC request | `external_tool.requested` session event |
+| Permission dispatch | `permission.request` JSON-RPC request | `permission.requested` session event |
+| Response mechanism | JSON-RPC response | SDK calls RPC method on CLI |
+| Concurrency | Serial (request/response) | Concurrent (fire-and-forget events) |
+
+Both protocols are supported simultaneously — the SDK handles v2 requests in `client.rs` and v3 events in `session.rs` (`handle_broadcast_event`).
+
+**Reference implementation:** See `~/.copilot/pkg/universal/<version>/copilot-sdk/index.js` for the official TypeScript SDK.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE).
